@@ -1,0 +1,6 @@
+[submodule "pdal"]
+	path = pdal
+	url = https://github.com/PDAL/PDAL.git
+[submodule "usgs-lidar"]
+	path = usgs-lidar
+	url = https://github.com/hobuinc/usgs-lidar.git
