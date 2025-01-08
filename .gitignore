@@ -3,3 +3,5 @@
 /pdal_piper/__pycache__
 /.idea
 /.idea
+/dist
+/pdal_piper.egg-info

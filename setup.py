@@ -10,5 +10,4 @@ setup(
     license='',
     author='Johnathan Tenny (j-tenny)',
     author_email='',
-    description=''
-)
+    description='Pythonic interface and utilities for PDAL (Point Data Abstraction Library) and USGS 3DEP lidar download.')

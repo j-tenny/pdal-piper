@@ -9,7 +9,12 @@ below.
 
 Basic Install:
 
-`pip install pdal-piper`
+```conda install pdal -c conda-forge
+pip install pdal-piper
+conda install geopandas -c conda-forge # Optional dependency```
+
+It is strongly recommended that you make use of Conda’s environment management system and install PDAL in a separate
+environment (i.e., not the base environment). Instructions can be found on the Conda website.
 
 The main dependency is pdal (`conda install pdal -c conda-forge`). Geopandas (`conda install geopandas -c conda-forge`)
 is an optional dependency required to use the USGS_3dep_Finder class.
