@@ -1,9 +1,23 @@
-Note: updating or modifying this package requires PDAL/PDAL as a submodule in order to read from its documentation.
-Use git submodule update --init --recursive to download or update pdal.
+# pdal-piper
 
-Tips on submodules: https://github.com/PDAL/PDAL.git
+This library provides a more Pythonic interface to PDAL (the Point Data Abstraction Library) and provides utilities for
+downloading lidar data from USGS 3DEP, slicing data into tiles, and processing tiles in parallel. Additionally,
+documentation for PDAL stages is built in, supporting tooltips and autocomplete in IPython/Jupyter. See example usage
+below.
 
-The main dependency is pdal. Geopandas is an optional dependency required to use the USGS_3dep_Finder class.
+## Installation
+
+Basic Install:
+
+`pip install pdal-piper`
+
+The main dependency is pdal (`conda install pdal -c conda-forge`). Geopandas (`conda install geopandas -c conda-forge`)
+is an optional dependency required to use the USGS_3dep_Finder class.
+
+For advanced users who need to re-execute convert_stages.py, you will need to setup `PDAL/PDAL` as a submodule in order
+to access the PDAL documentation. Use git submodule update --init --recursive to download or update pdal. Updating the
+USGS 3DEP availability map is a similar process that relies on `hobuinc/usgs-lidar` as a submodule.
+
 
 ## Example
 
