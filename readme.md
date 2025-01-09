@@ -20,8 +20,7 @@ conda install geopandas -c conda-forge
 It is strongly recommended that you make use of Conda’s environment management system and install PDAL in a separate
 environment (i.e., not the base environment). Instructions can be found on the Conda website.
 
-The main dependency is pdal (`conda install pdal -c conda-forge`). Geopandas (`conda install geopandas -c conda-forge`)
-is an optional dependency required to use the USGS_3dep_Finder class.
+
 
 For advanced users who need to re-execute convert_stages.py, you will need to setup `PDAL/PDAL` as a submodule in order
 to access the PDAL documentation. Use git submodule update --init --recursive to download or update pdal. Updating the
@@ -33,7 +32,7 @@ USGS 3DEP availability map is a similar process that relies on `hobuinc/usgs-lid
 In this example, we will find public lidar data on an online server, download data, clean it, canopy height statistics, and write files locally.
 
 ## Find point cloud data
-First we need to get some data to work with. I will show one method to pull data from an online server. First, we must define an area of interest using a bounding box `[xmin, ymin, xmax, ymax]`.
+First we need to get some data to work with. I will show one method to pull data from an online server. First, we must define an area of interest using a bounding box `[xmin, ymin, xmax, ymax]`. 
 
 In the first cell, I demonstrate how you can extract a bounding box from an interactive map using ipyleaflet (`conda install ipyleaflet`). Alternatively, you can skip this step and input a bounding box manually.
 
@@ -59,20 +58,27 @@ m.add_control(draw_control)
 m
 ```
 
-![Interactive map image](example_interactive_map.png)
+
+
+
+
+
+![Interactive Map Example](example_interactive_map.png)
+
+
 
 ```python
 # Print bounding box selected in interactive map
 bbox
 
 # If you want manually input a bounding box, uncomment the line below and edit the values
-#bbox = [-120.742342, 39.512467, -120.731442, 39.518311]
+#bbox = [-111.676326, 35.316211, -111.671391, 35.320098]
 ```
 
 
 
 
-    [-120.742342, 39.512467, -120.731442, 39.518311]
+    [-111.676326, 35.316211, -111.671391, 35.320098]
 
 
 
@@ -108,21 +114,36 @@ finder.search_result
       <th></th>
       <th>name</th>
       <th>id</th>
+      <th>pct_coverage</th>
+      <th>pts_per_m2</th>
       <th>count</th>
-      <th>area</th>
+      <th>total_area_ha</th>
       <th>url</th>
       <th>geometry</th>
     </tr>
   </thead>
   <tbody>
     <tr>
-      <th>1208</th>
-      <td>USGS_LPC_CA_NoCAL_Wildfires_B1_2018</td>
-      <td>1208</td>
-      <td>86376910091</td>
-      <td>608175.903458</td>
+      <th>117</th>
+      <td>AZ_Coconino_B1_2019</td>
+      <td>117</td>
+      <td>100.0</td>
+      <td>15.372670</td>
+      <td>55223690056</td>
+      <td>359232.920560</td>
       <td>https://s3-us-west-2.amazonaws.com/usgs-lidar-...</td>
-      <td>POLYGON ((-120.74234 39.51831, -120.73144 39.5...</td>
+      <td>POLYGON ((-111.67633 35.3201, -111.67139 35.32...</td>
+    </tr>
+    <tr>
+      <th>1194</th>
+      <td>USGS_LPC_AZ_VerdeKaibab_B2_2018_LAS_2019</td>
+      <td>1194</td>
+      <td>100.0</td>
+      <td>5.324541</td>
+      <td>35728383864</td>
+      <td>671013.439139</td>
+      <td>https://s3-us-west-2.amazonaws.com/usgs-lidar-...</td>
+      <td>POLYGON ((-111.67633 35.3201, -111.67139 35.32...</td>
     </tr>
   </tbody>
 </table>
@@ -132,16 +153,16 @@ finder.search_result
 
 
 ```python
-# Here we select the URL for the dataset in the first row.
+# Here we select the URL for the dataset in the first row. 
 # Alternatively, we could use a loop and download all of the available datasets.
-url = finder.search_result.iloc[0,4]
+url = finder.select_url(0)
 url
 ```
 
 
 
 
-    'https://s3-us-west-2.amazonaws.com/usgs-lidar-public/USGS_LPC_CA_NoCAL_Wildfires_B1_2018/ept.json'
+    'https://s3-us-west-2.amazonaws.com/usgs-lidar-public/AZ_Coconino_B1_2019/ept.json'
 
 
 
@@ -159,12 +180,8 @@ first_tile_bounds
 
 
 
-    '([-120.742342, -120.74117760947595], [39.517410999099994, 39.518311], [-9999, 9999])/EPSG:4326'
-
-
-
 ## Define processing pipeline
-We need to create a processing pipeline that defines all actions we want PDAL to execute. Each action in the pipeline is described by a 'stage'. In other workflows, the stages are combined in a json-like object, stored as a text file, and run through PDAL via the command line interface. In contrast, `pdal_piper` makes the experience more Pythonic by providing a Python class with built-in documentation for each stage. We use these classes to define each stage, then combine the stages in a list, then pass the list into a Piper object. The Piper object will format the json text and pass it to PDAL for execution.
+We need to create a processing pipeline that defines all actions we want PDAL to execute. Each action in the pipeline is described by a 'stage'. In other workflows, the stages are combined in a json-like object, stored as a text file, and run through PDAL via the command line interface. In contrast, `pdal_piper` makes the experience more Pythonic by providing a Python class with built-in documentation for each stage. We use these classes to define each stage, then combine the stages in a list, then pass the list into a Piper object. The Piper object will format the json text and pass it to PDAL for execution. 
 
 
 ```python
@@ -183,8 +200,8 @@ stages = [
     # Save point cloud to disk
     pps.writers_copc(filename='D:/DataWork/ALS_test/my_points.laz', extra_dims='all'),
     # Calculate canopy metrics
-    pps.writers_gdal(filename='D:/DataWork/ALS_test/canopy_metrics.tif', resolution=1,
-                     dimension='HeightAboveGround', output_type='all', binmode=True)
+    pps.writers_gdal(filename='D:/DataWork/ALS_test/canopy_metrics.tif', resolution=1, 
+                     dimension='HeightAboveGround', output_type='all', binmode=True)    
 ]
 
 # Create Piper object that handles formatting
@@ -197,14 +214,14 @@ piper.to_json()
 
 
 
-    '[{"type": "readers.ept", "filename": "https://s3-us-west-2.amazonaws.com/usgs-lidar-public/USGS_LPC_CA_NoCAL_Wildfires_B1_2018/ept.json", "bounds": "([-120.742342, -120.74117760947595], [39.517410999099994, 39.518311], [-9999, 9999])/EPSG:4326"}, {"type": "filters.outlier", "method": "statistical", "mean_k": 12, "multiplier": 2.2}, {"type": "filters.range", "limits": "Classification[0:6]"}, {"type": "filters.hag_delaunay"}, {"type": "writers.copc", "filename": "D:/DataWork/ALS_test/my_points.laz", "extra_dims": "all"}, {"type": "writers.gdal", "filename": "D:/DataWork/ALS_test/canopy_metrics.tif", "binmode": true, "resolution": 1, "output_type": "all", "dimension": "HeightAboveGround"}]'
+    '[{"type": "readers.ept", "filename": "https://s3-us-west-2.amazonaws.com/usgs-lidar-public/AZ_Coconino_B1_2019/ept.json", "bounds": "([-111.676326, -111.67522509346652], [35.3191979991, 35.320098], [-9999, 9999])/EPSG:4326"}, {"type": "filters.outlier", "method": "statistical", "mean_k": 12, "multiplier": 2.2}, {"type": "filters.range", "limits": "Classification[0:6]"}, {"type": "filters.hag_delaunay"}, {"type": "writers.copc", "filename": "D:/DataWork/ALS_test/my_points.laz", "extra_dims": "all"}, {"type": "writers.gdal", "filename": "D:/DataWork/ALS_test/canopy_metrics.tif", "binmode": true, "resolution": 1, "output_type": "all", "dimension": "HeightAboveGround"}]'
 
 
 
 
 ```python
 # Execute pipeline for first tile as a test
-pipeline = piper.to_pdal_pipeline()
+pipeline = piper.to_pdal_pipeline() 
 pipeline.execute()
 # If the log is empty, that is good. Otherwise, errors will show up in the log.
 pipeline.log

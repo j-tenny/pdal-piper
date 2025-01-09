@@ -282,36 +282,67 @@ def format_pdal_bounds_str(extents, crs_str):
                       [-9999,9999]])) + crs_str
 
 class USGS_3dep_Finder:
+    """Object for searching the USGS 3DEP catalog
 
-    def __init__(self,search_area,crs=None,clip_results=True):
+    Attributes:
+        search_result (geodataframe): records for point cloud datasets intersecting the search area
+    """
+
+    def __init__(self,search_area:Union[Sequence[float],'geoseries','geometry'],crs=None):
+        """Initilize 3DEP Finder with a search area
+
+        Args:
+            search_area: bounding box [xmin,ymin,xmax,ymax], point coordinate [x,y], geoseries, or shapely geometry
+            crs: proj-compatible coordinate reference system associated with search area
+        """
         import geopandas
         import shapely
         from shapely.geometry import Polygon,Point
         import importlib.resources as resources
 
-        if (type(search_area) is list) or (type(search_area) is tuple):
+        if hasattr(search_area,'geometry'):
+            geom = search_area.geometry
+
+        elif type(search_area) is shapely.Geometry:
+            geom = search_area
+
+        elif hasattr(search_area,'__getitem__'):
             if len(search_area) == 2:
                 geom = Point(search_area[0],search_area[1])
             elif len(search_area) == 4:
                 geom = Polygon.from_bounds(search_area[0],search_area[1],search_area[2],search_area[3])
-            else:
-                raise ValueError('Search area must be geopandas objects, shapely geometry, or list or tuple of length 2 (x, y) or 4 (xmin, ymin, xmax, ymax)')
-            search_area = geopandas.GeoSeries(geom, crs=crs)
+        else:
+            raise ValueError('Search area must be geoseries, shapely geometry, or sequence of length 2 (x, y) or 4 (xmin, ymin, xmax, ymax)')
 
-        elif type(search_area) is shapely.Geometry:
-            search_area = geopandas.GeoSeries(search_area, crs=crs)
+        if crs is None and hasattr(search_area,'crs'):
+            crs = search_area.crs
+
+        search_area = geopandas.GeoSeries(geom, crs=crs)
 
         with resources.open_binary('pdal_piper.data', 'usgs_3dep_resources.geojson') as f:
             usgs = geopandas.read_file(f)
 
-        search_area = search_area.to_crs(usgs.crs)
-        self.search_result = usgs[search_area.union_all().intersects(usgs.geometry)]
-        self.search_area = search_area
+        self.search_area = search_area.to_crs(usgs.crs)
+        search_area_proj = search_area.to_crs('EPSG:8857')
 
-        if clip_results:
+        self.search_result = usgs[self.search_area.union_all().intersects(usgs.geometry)]
+        search_result_proj = self.search_result.to_crs('EPSG:8857')
+        self.search_result.insert(2, 'pts_per_m2',search_result_proj['count']/search_result_proj.area)
+        self.search_result.insert(4, 'total_area_ha', search_result_proj.area/10000)
+
+
+        if search_area_proj.area.sum() > 1:
             self.search_result = geopandas.clip(self.search_result, self.search_area)
+            coverage =  self.search_result.to_crs('EPSG:8857').area / search_area_proj.area.sum() * 100
+            self.search_result.insert(2, 'pct_coverage', coverage)
+        else:
+            self.search_result.insert(2, 'pct_coverage', 100)
 
-        self.search_result.insert(3, 'area', self.search_result.to_crs('EPSG:8857').area)
+        self.search_result.sort_values(by=['pct_coverage','pts_per_m2'], ascending=False, inplace=True)
+
+    def select_url(self,index):
+        """Select url with row index"""
+        return self.search_result['url'].iloc[index]
 
     def download_copc(self,filepath,merge=True):
         from pdal_piper import stages
