@@ -1,8 +1,7 @@
 # pdal-piper
 
-This library provides a more Pythonic interface to PDAL (the Point Data Abstraction Library) and provides utilities for
-downloading lidar data from USGS 3DEP, slicing data into tiles, and processing tiles in parallel. Additionally,
-documentation for PDAL stages is built in, supporting tooltips and autocomplete in IPython/Jupyter. See example usage
+This library provides static python classes for building pipelines in PDAL (the Point Data Abstraction Library) and provides utilities for
+downloading lidar data from USGS 3DEP, slicing data into tiles, and processing tiles in parallel. See example usage
 below.
 
 ## Installation
