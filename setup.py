@@ -6,8 +6,10 @@ setup(
     packages=['pdal_piper'],
     package_data={'pdal_piper': ['data/usgs_3dep_resources.geojson']},
     include_package_data=True,
-    url='',
+    url='https://github.com/j-tenny/pdal-piper',
     license='',
     author='Johnathan Tenny (j-tenny)',
     author_email='',
-    description='Pythonic interface and utilities for PDAL (Point Data Abstraction Library) and USGS 3DEP lidar download.')
+    description='Pythonic interface and utilities for PDAL (Point Data Abstraction Library) and USGS 3DEP lidar download.',
+    long_description=open('readme.md').read(),
+    long_description_content_type="text/markdown")

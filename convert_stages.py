@@ -1,7 +1,7 @@
 import os
 import shutil
 
-rst_files = [file for file in os.listdir('pdal/doc/stages') if file[-4:]=='.rst']
+rst_files = [file for file in os.listdir('pdal/doc/stages') if file[-3:]=='.md']
 
 lines = []
 lines.append("class _GenericStage:\n")
@@ -58,7 +58,7 @@ for file in rst_files:
 
 
     # Create class definition
-    lines.append("class " + file[:-4].replace('.','_') + "(_GenericStage):\n")
+    lines.append("class " + file[:-3].replace('.','_') + "(_GenericStage):\n")
     lines.append("    \"\"\"\n")
     lines.extend(doc_lines)
     lines.append("\"\"\"\n")
@@ -66,7 +66,7 @@ for file in rst_files:
     lines.append(f"    def __init__(self, {options} **kwargs):\n")
     lines.append(f"        args = " + options_dict_str + "\n")
     lines.append(f"        args.update(kwargs)\n")
-    lines.append(f"        super().__init__('{file[:-4]}', **args)\n \n")
+    lines.append(f"        super().__init__('{file[:-3]}', **args)\n \n")
 
 
 if os.path.exists('pdal_piper/stages.py'):
