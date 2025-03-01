@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
     name='pdal-piper',
-    version='0.1.1',
+    version='0.1.3',
     packages=['pdal_piper'],
     package_data={'pdal_piper': ['data/usgs_3dep_resources.geojson']},
     include_package_data=True,
@@ -10,6 +10,5 @@ setup(
     license='',
     author='Johnathan Tenny (j-tenny)',
     author_email='',
-    description='Pythonic interface and utilities for PDAL (Point Data Abstraction Library) and USGS 3DEP lidar download.',
-    long_description=open('readme.md').read(),
-    long_description_content_type="text/markdown")
+    description='Pythonic interface and utilities for PDAL (Point Data Abstraction Library) and USGS 3DEP lidar download.'
+)

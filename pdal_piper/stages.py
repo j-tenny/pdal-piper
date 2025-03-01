@@ -10047,8 +10047,8 @@ threads
 [lazperf]: https://github.com/verma/laz-perf
 """
 
-    def __init__(self, inputs = None, tag = None, **kwargs):
-        args = {'inputs':inputs,'tag':tag}
+    def __init__(self, filename=None, start=None, extra_dims=None, use_eb_vlr=None, compression=None, ignore_vlr=None, fix_dims=None, nosrs=None, threads=None, inputs = None, tag = None, **kwargs):
+        args = {'filename':filename, 'start':start, 'extra_dims':extra_dims, 'use_eb_vlr':use_eb_vlr, 'compression':compression, 'ignore_vlr':ignore_vlr, 'fix_dims':fix_dims, 'nosrs':nosrs, 'threads':threads, 'inputs':inputs,'tag':tag}
         args.update(kwargs)
         super().__init__('readers.las', **args)
  

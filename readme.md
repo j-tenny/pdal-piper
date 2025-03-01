@@ -4,6 +4,10 @@ This library provides static python classes for building pipelines in PDAL (the 
 downloading lidar data from USGS 3DEP, slicing data into tiles, and processing tiles in parallel. See example usage
 below.
 
+**The automated update process for this library is currently broken and needs to be reworked, thus may not be compatible 
+with the current version of PDAL. Originally developed for pdal version 4.8.2, though bugs may still be present 
+regardless of pdal version.**
+
 ## Installation
 
 Basic Install:
@@ -18,7 +22,6 @@ conda install geopandas -c conda-forge
 
 It is strongly recommended that you make use of Conda’s environment management system and install PDAL in a separate
 environment (i.e., not the base environment). Instructions can be found on the Conda website.
-
 
 
 For advanced users who need to re-execute convert_stages.py, you will need to setup `PDAL/PDAL` as a submodule in order
