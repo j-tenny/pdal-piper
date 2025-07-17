@@ -10,6 +10,7 @@ In the first cell, I demonstrate how you can extract a bounding box from an inte
 
 ```python
 import ipyleaflet
+import numpy as np
 
 basemap = ipyleaflet.TileLayer(url='https://services.arcgisonline.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}')
 m = ipyleaflet.Map(center=[39, -100], zoom=5, scroll_wheel_zoom=True, basemap=basemap)
@@ -29,13 +30,7 @@ m.add_control(draw_control)
 m
 ```
 
-
-
-
-    Map(center=[39, -100], controls=(ZoomControl(options=['position', 'zoom_in_text', 'zoom_in_title', 'zoom_out_t…
-
-
-
+![example_interactive_map.png](example_interactive_map.png)
 
 ```python
 # Print bounding box selected in interactive map
@@ -45,25 +40,15 @@ bbox
 #bbox = [-111.676326, 35.316211, -111.671391, 35.320098]
 ```
 
-
-
-
-    [-111.676326, 35.316211, -111.671391, 35.320098]
-
-
-
 Next, we can search the USGS 3DEP catalog to find publicly available point clouds that overlap our area of interest using `pdal_piper.USGS_3dep_Finder`. USGS 3DEP is stored in Entwine Point Tile (.ept) format which means we can efficiently download small segments of the point cloud using a url.
 
 
 ```python
 import pdal_piper
-finder = pdal_piper.USGS_3dep_Finder(bbox,'EPSG:4326')
+finder = pdal_piper.USGS_3dep_Finder()
+finder.search_3dep(bbox,'EPSG:4326')
 finder.search_result
 ```
-
-
-
-
 <div>
 <style scoped>
     .dataframe tbody tr th:only-of-type {
@@ -94,9 +79,9 @@ finder.search_result
   </thead>
   <tbody>
     <tr>
-      <th>117</th>
+      <th>120</th>
       <td>AZ_Coconino_B1_2019</td>
-      <td>117</td>
+      <td>120</td>
       <td>100.0</td>
       <td>15.372670</td>
       <td>55223690056</td>
@@ -105,9 +90,9 @@ finder.search_result
       <td>POLYGON ((-111.67633 35.3201, -111.67139 35.32...</td>
     </tr>
     <tr>
-      <th>1194</th>
+      <th>1253</th>
       <td>USGS_LPC_AZ_VerdeKaibab_B2_2018_LAS_2019</td>
-      <td>1194</td>
+      <td>1253</td>
       <td>100.0</td>
       <td>5.324541</td>
       <td>35728383864</td>
@@ -118,9 +103,6 @@ finder.search_result
   </tbody>
 </table>
 </div>
-
-
-
 
 ```python
 # Here we select the URL for the dataset in the first row. 
@@ -143,60 +125,67 @@ To improve computational efficiency and scalability, we can divide our area of i
 ```python
 tiler = pdal_piper.Tiler(extents = bbox, tile_size=100, buffer=0, convert_units=True, crs='EPSG:4326')
 tile_bounds = tiler.get_tiles(format_as_pdal_str=True,flatten=False)
+print(type(tile_bounds))
+print(tile_bounds.shape)
+```
+
+    <class 'numpy.ndarray'>
+    (4, 4)
+    
+
+
+```python
 first_tile_bounds = tile_bounds[0,0]
 first_tile_bounds
 ```
 
 
-![Interactive Map Example](example_interactive_map.png)
+
+
+    '([-111.676326, -111.67522509346652], [35.3191979991, 35.320098], [-9999, 9999])/EPSG:4326'
 
 
 
 ## Define processing pipeline
-We need to create a processing pipeline that defines all actions we want PDAL to execute. Each action in the pipeline is described by a 'stage'. In other workflows, the stages are combined in a json-like object, stored as a text file, and run through PDAL via the command line interface. In contrast, `pdal_piper` makes the experience more Pythonic by providing a Python class with built-in documentation for each stage. We use these classes to define each stage, then combine the stages in a list, then pass the list into a Piper object. The Piper object will format the json text and pass it to PDAL for execution. 
+We need to create a processing pipeline that defines all actions we want PDAL to execute. Each action in the pipeline is described by a 'stage'. In other workflows, the stages are combined in a json-like object, stored as a text file, and run through PDAL via the command line interface. In contrast, `pdal_piper` makes the experience more Pythonic by providing a Python class with built-in documentation for each stage. We use these classes to define each stage, then combine the stages in a list, then pass the list into a Piper object. The Piper object will format the json text and pass it to PDAL for execution.
 
 
 ```python
-# Import the stages
-import pdal_piper.stages as pps
+import pdal
+import numpy as np
 
 # Define processing pipeline for the first tile
-stages = [
-    # Read point cloud data from online source
-    pps.readers_ept(filename=url, bounds=first_tile_bounds),
-    # Find and remove outliers
-    pps.filters_outlier(method='statistical',mean_k=12,multiplier=2.2),
-    pps.filters_range(limits='Classification[0:6]'),
-    # Calculate height above ground for veg points
-    pps.filters_hag_delaunay(),
-    # Save point cloud to disk
-    pps.writers_copc(filename='D:/DataWork/ALS_test/my_points.laz', extra_dims='all'),
-    # Calculate canopy metrics
-    pps.writers_gdal(filename='D:/DataWork/ALS_test/canopy_metrics.tif', resolution=1, 
-                     dimension='HeightAboveGround', output_type='all', binmode=True)    
-]
+pipelines = []
 
-# Create Piper object that handles formatting
-piper = pdal_piper.Piper(stages)
+for xi, yi in np.ndindex(tile_bounds.shape):
+    stages = [
+        pdal.Reader.ept(filename=url, bounds=tile_bounds[xi, yi]),
+        pdal.Filter.outlier(method='statistical',mean_k=12,multiplier=2.2),
+        pdal.Filter.range(limits='Classification[0:6]'),
+        pdal.Filter.hag_delaunay(),
+        pdal.Writer.copc(filename=f'test_data/points_{xi}_{yi}.laz', extra_dims='all'),
+        pdal.Writer.gdal(filename='test_data/canopy_metrics.tif', resolution=1,
+                         dimension='HeightAboveGround', output_type='all', binmode=True)
+    ]
+    pipelines.append(pdal.Pipeline(stages))
 
-# View pipeline in json formatting
-piper.to_json()
+# View pipeline for first tile in json formatting
+pipelines[0].toJSON()
 ```
 
 
 
 
-    '[{"type": "readers.ept", "filename": "https://s3-us-west-2.amazonaws.com/usgs-lidar-public/AZ_Coconino_B1_2019/ept.json", "bounds": "([-111.676326, -111.67522509346652], [35.3191979991, 35.320098], [-9999, 9999])/EPSG:4326"}, {"type": "filters.outlier", "method": "statistical", "mean_k": 12, "multiplier": 2.2}, {"type": "filters.range", "limits": "Classification[0:6]"}, {"type": "filters.hag_delaunay"}, {"type": "writers.copc", "filename": "D:/DataWork/ALS_test/my_points.laz", "extra_dims": "all"}, {"type": "writers.gdal", "filename": "D:/DataWork/ALS_test/canopy_metrics.tif", "binmode": true, "resolution": 1, "output_type": "all", "dimension": "HeightAboveGround"}]'
+    '[{"type": "readers.ept", "bounds": "([-111.676326, -111.67522509346652], [35.3191979991, 35.320098], [-9999, 9999])/EPSG:4326", "filename": "https://s3-us-west-2.amazonaws.com/usgs-lidar-public/AZ_Coconino_B1_2019/ept.json", "tag": "readers_ept1"}, {"type": "filters.outlier", "method": "statistical", "mean_k": 12, "multiplier": 2.2, "tag": "filters_outlier1"}, {"type": "filters.range", "limits": "Classification[0:6]", "tag": "filters_range1"}, {"type": "filters.hag_delaunay", "tag": "filters_hag_delaunay1"}, {"type": "writers.copc", "extra_dims": "all", "filename": "test_data/points_0_0.laz", "tag": "writers_copc1"}, {"type": "writers.gdal", "resolution": 1, "dimension": "HeightAboveGround", "output_type": "all", "binmode": true, "filename": "test_data/canopy_metrics.tif", "tag": "writers_gdal1"}]'
 
 
 
 
 ```python
 # Execute pipeline for first tile as a test
-pipeline = piper.to_pdal_pipeline() 
-pipeline.execute()
+pipelines[0].execute()
+pipelines[0].log
 # If the log is empty, that is good. Otherwise, errors will show up in the log.
-pipeline.log
 ```
 
 
@@ -213,7 +202,7 @@ Note, if `Tiler.buffer>0` and the `filters_crop` stage is used in the pipeline, 
 
 ```python
 # Execute pipeline for all tiles
-logs = tiler.execute_piper(piper=piper)
+logs = pdal_piper.execute_pipelines_parallel(pipelines)
 [log for log in logs if log != '']
 ```
 

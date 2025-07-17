@@ -5,3 +5,4 @@
 /.idea
 /dist
 /pdal_piper.egg-info
+/test_data

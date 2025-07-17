@@ -1,83 +1,12 @@
 import warnings
-from typing import Sequence, Union, Iterable
-
+from typing import Sequence, Union, Iterable,Tuple
 import numpy as np
+import pdal
 
-import pdal_piper
-from pdal_piper.stages import _GenericStage
-
-
-class Piper:
-    """
-    Class to construct pdal pipelines from a series of stages
-
-    Attributes:
-        stages (list[dict]): A json-like representation of the stages that make up the pipeline
-    """
-
-    def __init__(self,stages:Union[Iterable,None]=None):
-        """Initialize instance of Piper with a list of stages (or input None to leave empty)"""
-
-        self.stages = []
-
-        if type(stages) is Piper:
-            self.stages = Piper.stages
-        elif stages is None:
-            pass
-        else:
-            try:
-                self.extend_stages(stages)
-            except:
-                raise TypeError("Input must be a list of pdal_piper stages or None")
-
-    def __repr__(self):
-        """String representation in json format"""
-        self.to_json()
-
-    def insert_stage(self,stage:"_GenericStage",index=0):
-        """Insert a stage into the stages list at the specified index position"""
-        rec = {'type':stage.name}
-        for arg in stage.args:
-            rec[arg[0]] = arg[1]
-        self.stages.insert(index, rec)
-
-    def append_stage(self,stage:"_GenericStage"):
-        """Append a stage to the end of the stages list"""
-        if isinstance(stage, _GenericStage):
-            rec = {'type':stage.name}
-            for arg in stage.args:
-                rec[arg[0]] = arg[1]
-            self.stages.append(rec)
-        else:
-            raise TypeError("Input must be an instance of a pdal_piper stage")
-
-    def extend_stages(self,stages:Iterable):
-        """Extend stages list using a list of additional stages"""
-        for stage in stages:
-            self.append_stage(stage)
-
-    def pop_stage(self,index):
-        """Pop a stage from the stages list based on index position"""
-        return self.stages.pop(index)
-
-    def print_stage_types(self):
-        """Print stage type from list of stages"""
-        stage_types = [stage['type'] for stage in self.stages]
-        print(stage_types)
-
-    def to_json(self):
-        """Return json string representation of the pipeline"""
-        import json
-        return json.dumps(self.stages)
-
-    def to_pdal_pipeline(self):
-        """Return executable pdal.Pipeline object"""
-        import pdal
-        return pdal.Pipeline(self.to_json())
 
 class Tiler:
     """
-    Class to divide an area into tiles and perform pdal pipelines on each tile
+    Class to divide an area into tiles and execute pdal pipelines on each tile
     Attributes:
         extents (tuple[float]): 2D geographic extents of tile set [xmin, ymin, xmax, ymax]
         tile_size (tuple[float]): size of each tile
@@ -204,57 +133,6 @@ class Tiler:
 
         return tiles
 
-    def execute_piper(self,piper:Piper,max_workers=None):
-        """Applies a Piper object to all tiles, substituting 'bounds' arg in reader and 'filename' arg in writer
-
-        piper (Piper): Piper object containing a reader that supports the 'bounds' arg and a writer that supports the
-                       'filename' arg. If the filters.crop stage is included and buffer>0, the unbuffered tile extents
-                        will be used as cropping bounds.
-        output_path (str): path to output file, e.g. 'output_folder/result.las'. Row and column indexes will be added
-                        automatically preceeding the file extension.
-        max_workers (int): maximum number of processes to run in parallel. If None, defaults to os.cpu_count() / 2.
-                        If memory usage by each process is high and memory is limited, may need to decrease this value.
-        """
-        import os
-        from copy import deepcopy
-
-        # Get variables used to assign filenames
-        filename_pad = len(str(max(self.n_tiles_x,self.n_tiles_y)))
-
-        # Look for presence of crop filter and buffer to determine if cropping will occur
-        if self.buffer>=0:
-            crop = False
-            for stage in piper.stages:
-                if stage['type'] == 'filters.crop':
-                    crop = True
-                    break
-
-        # Get tiles
-        tiles = self.get_tiles(remove_buffer=False,format_as_pdal_str=True,flatten=False)
-        if crop:
-            tiles_no_buffer = self.get_tiles(remove_buffer=True,format_as_pdal_str=True,flatten=False)
-        else:
-            tiles_no_buffer = tiles
-
-        pipes = list()
-        # Get pipeline for each tile
-        for i in range(self.n_tiles_x):
-            for j in range(self.n_tiles_y):
-                # Replace values for this tile
-                piper_cur = deepcopy(piper)
-                for stage in piper_cur.stages:
-                    if 'reader' in stage['type']:
-                        stage['bounds'] = tiles[i, j]
-                    if 'writer' in stage['type']:
-                        basename, ext = os.path.splitext(stage['filename'])
-                        stage['filename'] = f'{basename}_{i:0{filename_pad}}_{j:0{filename_pad}}{ext}'
-                    if stage['type'] == 'filters.crop' and crop:
-                        stage['bounds'] = tiles_no_buffer[i, j]
-                pipes.append(piper_cur.to_pdal_pipeline())
-
-
-        return execute_pipelines_parallel(pipes,max_workers=max_workers)
-
 
 def execute_pipelines_parallel(pipelines:Iterable,max_workers:int=None):
     """Execute a list of pdal pipelines using parallel processes
@@ -274,6 +152,47 @@ def _execute_pipeline(pipeline):
     pipeline.execute()
     return pipeline.log
 
+def read_pdal(filepath,bounds=None,calculate_height=True,reproject_to=None)->Tuple['pd.DataFrame',str]:
+    """Read a file to a dataframe with pdal. Returns pl.DataFrame and crs
+
+    Args:
+        filepath (str): Path to ALS file readable by pdal. Type is inferred by extension.
+        bounds (str): Clip extents of the resource in 2 or 3 dimensions, formatted as pdal-compatible string,
+            e.g.: ([xmin, xmax], [ymin, ymax], [zmin, zmax]). If omitted, the entire dataset will be selected.
+            The bounds can be followed by a slash (‘/’) and a spatial reference specification to apply to the bounds.
+        calculate_height (bool): Calculate height above ground for each point using Delauney triangulation
+        reproject_to (str): Reproject to this CRS. Use format 'EPSG:5070' or PROJ. If None, no reprojection will be done.
+                """
+    import pdal
+    import pandas as pd
+
+    result=0
+
+    filters = []
+    if bounds is not None:
+        filters.append(pdal.Reader(filepath, bounds=bounds))
+    else:
+        filters.append(pdal.Reader(filepath))
+
+    if reproject_to is not None:
+        filters.append(pdal.Filter.reprojection(out_srs=reproject_to))
+
+    if calculate_height:
+        count = 10
+        while result == 0 and count < 100:
+            filters_temp = filters + [pdal.Filter.hag_delaunay(count=count)]
+            try:
+                pipeline = pdal.Pipeline(filters_temp)
+                result = pipeline.execute()
+            except:
+                count *= 2
+    else:
+        pipeline = pdal.Pipeline(filters)
+        pipeline.execute()
+
+    return pd.DataFrame(pipeline.arrays[0]), pipeline.srswkt2
+
+
 
 def format_pdal_bounds_str(extents, crs_str):
     """Reformat as ([xmin,xmax],[ymin,ymax])/{crs_str}"""
@@ -288,8 +207,22 @@ class USGS_3dep_Finder:
         search_result (geodataframe): records for point cloud datasets intersecting the search area
     """
 
-    def __init__(self,search_area:Union[Sequence[float],'geoseries','geometry'],crs=None):
-        """Initilize 3DEP Finder with a search area
+    def __init__(self):
+        """Initialize USGS_3dep_Finder and downloads current resource geojson"""
+        import requests
+        import geopandas
+
+        self.search_result = None
+
+        url = "https://raw.githubusercontent.com/hobuinc/usgs-lidar/master/boundaries/resources.geojson"
+
+        response = requests.get(url)
+        response.raise_for_status()  # Raises an exception for HTTP errors
+
+        self.usgs = geopandas.read_file(response.text)
+
+    def search_3dep(self,search_area:Union[Sequence[float],'geoseries','geometry'],crs=None):
+        """Search for USGS 3DEP resources that overlap with a search area
 
         Args:
             search_area: bounding box [xmin,ymin,xmax,ymax], point coordinate [x,y], geoseries, or shapely geometry
@@ -298,7 +231,6 @@ class USGS_3dep_Finder:
         import geopandas
         import shapely
         from shapely.geometry import Polygon,Point
-        import importlib.resources as resources
 
         if hasattr(search_area,'geometry'):
             geom = search_area.geometry
@@ -319,17 +251,13 @@ class USGS_3dep_Finder:
 
         search_area = geopandas.GeoSeries(geom, crs=crs)
 
-        with resources.open_binary('pdal_piper.data', 'usgs_3dep_resources.geojson') as f:
-            usgs = geopandas.read_file(f)
-
-        self.search_area = search_area.to_crs(usgs.crs)
+        self.search_area = search_area.to_crs(self.usgs.crs)
         search_area_proj = search_area.to_crs('EPSG:8857')
 
-        self.search_result = usgs[self.search_area.union_all().intersects(usgs.geometry)]
+        self.search_result = self.usgs[self.search_area.union_all().intersects(self.usgs.geometry)]
         search_result_proj = self.search_result.to_crs('EPSG:8857')
         self.search_result.insert(2, 'pts_per_m2',search_result_proj['count']/search_result_proj.area)
         self.search_result.insert(4, 'total_area_ha', search_result_proj.area/10000)
-
 
         if search_area_proj.area.sum() > 1:
             self.search_result = geopandas.clip(self.search_result, self.search_area)
@@ -340,18 +268,9 @@ class USGS_3dep_Finder:
 
         self.search_result.sort_values(by=['pct_coverage','pts_per_m2'], ascending=False, inplace=True)
 
+        return self.search_result
+
     def select_url(self,index):
-        """Select url with row index"""
+        """Select url from self.search_result using row index"""
         return self.search_result['url'].iloc[index]
 
-    def download_copc(self,filepath,merge=True):
-        from pdal_piper import stages
-        pipe = Piper()
-        for i in range(len(self.search_result)):
-            pipe.append_stage(stages.readers_ept(filename=self.search_result['url'].iloc[0],
-                                                 polygon = self.search_area.union_all().wkt + '/' + self.search_area.crs.to_wkt()))
-        if (len(self.search_result) > 1) and merge:
-            pipe.append_stage(stages.filters_merge())
-
-        pipe.append_stage(stages.writers_copc(filename=filepath))
-        return pipe.execute()

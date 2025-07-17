@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pdal-piper"
+version = "0.2.0"
+description = "Type stubs and utilities for PDAL (Point Data Abstraction Library) and USGS 3DEP lidar download."
+authors = [
+    {name = "Johnathan Tenny (j-tenny)", email = "jt893@nau.edu"}
+]
+license = {text = "MIT"}
+readme = "README.md"
+requires-python = ">=3.9"
+
+dependencies = [
+#    use `conda install -c conda-forge pdal pdal-python gdal geopandas`
+]
+
+[project.scripts]
+pdal-piper-setup = "pdal_piper.skeletons:generate_skeletons"
+
+[project.urls]
+Homepage = "https://github.com/j-tenny/pdal-piper"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["pdal_piper*"]

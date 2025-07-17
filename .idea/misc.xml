@@ -3,5 +3,5 @@
   <component name="Black">
     <option name="sdkName" value="pdal" />
   </component>
-  <component name="ProjectRootManager" version="2" project-jdk-name="pdal" project-jdk-type="Python SDK" />
+  <component name="ProjectRootManager" version="2" project-jdk-name="C:\Users\john1\miniforge3\envs\pdal\envs\pdal_piper" project-jdk-type="Python SDK" />
 </project>
