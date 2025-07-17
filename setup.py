@@ -34,7 +34,7 @@ class PostDevelopCommand(develop):
 
 setup(
     name='pdal-piper',
-    version='0.2.1',
+    version='0.2.3',
     packages=['pdal_piper'],
     url='https://github.com/j-tenny/pdal-piper',
     license='MIT',

@@ -113,19 +113,10 @@ class Tiler:
 
         if format_as_pdal_str:
             # Get crs string
-            if self.crs is None:
-                #import warnings
-                #warnings.warn('If crs is not provided, ensure extents crs matches data source crs', UserWarning)
-                crs_str = ''
-            else:
-                try:
-                    crs_str = '/' + str(self.crs.to_wkt())
-                except:
-                    crs_str = '/' + str(self.crs)
             tiles_temp =  np.empty((tiles.shape[0],tiles.shape[1]), dtype=object)
             for i in range(self.n_tiles_x):
                 for j in range(self.n_tiles_y):
-                    tiles_temp[i, j] = format_pdal_bounds_str(tiles[i, j], crs_str)
+                    tiles_temp[i, j] = format_pdal_bounds_str(tiles[i, j], self.crs)
             tiles = tiles_temp
 
         if flatten:
@@ -194,11 +185,20 @@ def read_pdal(filepath,bounds=None,calculate_height=True,reproject_to=None)->Tup
 
 
 
-def format_pdal_bounds_str(extents, crs_str):
+def format_pdal_bounds_str(extents, crs=None):
     """Reformat as ([xmin,xmax],[ymin,ymax])/{crs_str}"""
+    if crs is None:
+        import warnings
+        warnings.warn('If crs is not provided, ensure extents crs matches data source crs')
+        crs = ''
+    else:
+        try:
+            crs = '/' + str(crs.to_wkt())
+        except:
+            crs = '/' + str(crs)
     return str(tuple([[float(extents[0]), float(extents[2])],
                       [float(extents[1]), float(extents[3])],
-                      [-9999,9999]])) + crs_str
+                      [-9999,9999]])) + crs
 
 class USGS_3dep_Finder:
     """Object for searching the USGS 3DEP catalog

@@ -57,11 +57,12 @@ class class_method_skeleton:
     @property
     def docstring(self):
         s = f"{tab(2)}\"\"\"{self.description}\n\n"
-        s += f'Documentation represents PDAL version {PDAL_VERSION}\n\n'
-        s += f'https://pdal.io/en/{PDAL_VERSION}/stages/{self.fullname}.html\n\n'
-        s += f"{tab(2)}Options:\n"
+        s += f'You are using PDAL version {PDAL_VERSION}\n\n'
+        #s += f'https://pdal.io/en/{PDAL_VERSION}/stages/{self.fullname}.html\n\n'
+        s += f'https://pdal.io/en/stable/stages/{self.fullname}.html\n\n'
+        s += f"{tab(2)}Args:\n"
         for option in self.options:
-            s += f"{tab(3)}{option['name']}: {option['description']}\n"
+            s += f"{tab(3)}{option['name']}: {option['description']}\n\n"
         s += f"{tab(2)}\"\"\"\n\n"
         return s
 
