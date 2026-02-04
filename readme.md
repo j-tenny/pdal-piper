@@ -1,10 +1,10 @@
 # pdal-piper
 
-Type stubs and utilities PDAL (Point Data Abstraction Library) and USGS 3DEP.
+IDE support and convenience utilities for PDAL (Point Data Abstraction Library) and USGS 3DEP.
 
 ## Overview
 
-**Type stubs for PDAL**: Adds support for IntelliSense and inline documentation to the `pdal-python` package for better 
+**IDE support for PDAL**: Adds support for IntelliSense and inline documentation to the `pdal-python` packages for better 
 IDE support when developing pdal pipelines in PyCharm, VSCode, etc. After installing `pdal-piper`, your IDE should be able
 to recognize objects like `pdal.Reader.copc()` and provide descriptions of the input parameters.
 
@@ -88,19 +88,6 @@ finder.search_3dep(bbox,'EPSG:4326')
 finder.search_result
 ```
 <div>
-<style scoped>
-    .dataframe tbody tr th:only-of-type {
-        vertical-align: middle;
-    }
-
-    .dataframe tbody tr th {
-        vertical-align: top;
-    }
-
-    .dataframe thead th {
-        text-align: right;
-    }
-</style>
 <table border="1" class="dataframe">
   <thead>
     <tr style="text-align: right;">
@@ -185,7 +172,7 @@ first_tile_bounds
 
 
 ## Define processing pipeline
-We need to create a processing pipeline that defines all actions we want PDAL to execute. Each action in the pipeline is described by a 'stage'. In other workflows, the stages are combined in a json-like object, stored as a text file, and run through PDAL via the command line interface. In contrast, `pdal_piper` makes the experience more Pythonic by providing a Python class with built-in documentation for each stage. We use these classes to define each stage, then combine the stages in a list, then pass the list into a Piper object. The Piper object will format the json text and pass it to PDAL for execution.
+We need to create a processing pipeline that defines all actions we want PDAL to execute. Each action in the pipeline is described by a 'stage' (a Reader, Filter, or Writer). 
 
 
 ```python
@@ -233,10 +220,7 @@ pipelines[0].log
 
 
 
-Lastly, we can run the pipeline on all files in the tile set. Tile bounds in the reader stage will automatically be assigned from the unique tile bounds. File names in the writer stages will automatically be assigned a unique value by inserting tile indices between the file basename and the file extension. Pipelines are executed in parallel processes.
-
-Note, if `Tiler.buffer>0` and the `filters_crop` stage is used in the pipeline, the filter will automatically use the buffered tile extents in the reader and the unbuffered tile extents in the crop filter. In this special case, the CRS of the Tiler must match the CRS of the point cloud.
-
+After defining the processing pipeline for each tile, we can process all the pipelines in parallel.
 
 ```python
 # Execute pipeline for all tiles
