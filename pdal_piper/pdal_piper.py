@@ -221,23 +221,35 @@ class USGS_3dep_Finder:
 
         self.usgs = geopandas.read_file(response.text)
 
-    def search_3dep(self,search_area:Union[Sequence[float],'geoseries','geometry'],crs=None):
+    def search_3dep(self,search_area:Union[Sequence[float],'geoseries','geometry'],crs=None, search_type='entwine', n_threads=None):
         """Search for USGS 3DEP resources that overlap with a search area
 
         Args:
+
             search_area: bounding box [xmin,ymin,xmax,ymax], point coordinate [x,y], geoseries, or shapely geometry
+
             crs: proj-compatible coordinate reference system associated with search area
+
+            search_type: If 'entwine', searches https://usgs.entwine.io and returns a record for each entwine resource
+                intersecting the search area. If 'science-base', searches https://www.sciencebase.gov/catalog/item/4f70ab64e4b058caae3f8def
+                and returns a record for each .laz tile intersecting the search area.
+
+            n_threads: Number of threads to use for parallel processing of science-base requests. Default None results
+                in max_workers = min(32, os.cpu_count() + 4).
         """
         import geopandas
+        import pandas as pd
         import shapely
         from shapely.geometry import Polygon,Point
+        from shapely.geometry.base import BaseGeometry
+        import requests
+        import time
 
+        # Interpret search area as a geometry
         if hasattr(search_area,'geometry'):
             geom = search_area.geometry
-
-        elif type(search_area) is shapely.Geometry:
+        elif hasattr(search_area, "__geo_interface__"):
             geom = search_area
-
         elif hasattr(search_area,'__getitem__'):
             if len(search_area) == 2:
                 geom = Point(search_area[0],search_area[1])
@@ -246,31 +258,139 @@ class USGS_3dep_Finder:
         else:
             raise ValueError('Search area must be geoseries, shapely geometry, or sequence of length 2 (x, y) or 4 (xmin, ymin, xmax, ymax)')
 
+        # Create geoseries from geom and crs
         if crs is None and hasattr(search_area,'crs'):
             crs = search_area.crs
-
         search_area = geopandas.GeoSeries(geom, crs=crs)
 
-        self.search_area = search_area.to_crs(self.usgs.crs)
-        search_area_proj = search_area.to_crs('EPSG:8857')
+        # Perform search of entwine resources
+        if search_type == 'entwine':
+            self.search_area = search_area.to_crs(self.usgs.crs)
+            search_area_proj = search_area.to_crs('EPSG:8857')
 
-        self.search_result = self.usgs[self.search_area.union_all().intersects(self.usgs.geometry)]
-        search_result_proj = self.search_result.to_crs('EPSG:8857')
-        self.search_result.insert(2, 'pts_per_m2',search_result_proj['count']/search_result_proj.area)
-        self.search_result.insert(4, 'total_area_ha', search_result_proj.area/10000)
+            self.search_result = self.usgs[self.search_area.union_all().intersects(self.usgs.geometry)]
+            search_result_proj = self.search_result.to_crs('EPSG:8857')
+            self.search_result.insert(2, 'pts_per_m2',search_result_proj['count']/search_result_proj.area)
+            self.search_result.insert(4, 'total_area_ha', search_result_proj.area/10000)
 
-        if search_area_proj.area.sum() > 1:
-            self.search_result = geopandas.clip(self.search_result, self.search_area)
-            coverage =  self.search_result.to_crs('EPSG:8857').area / search_area_proj.area.sum() * 100
-            self.search_result.insert(2, 'pct_coverage', coverage)
+            if search_area_proj.area.sum() > 1:
+                self.search_result = geopandas.clip(self.search_result, self.search_area)
+                coverage =  self.search_result.to_crs('EPSG:8857').area / search_area_proj.area.sum() * 100
+                self.search_result.insert(2, 'pct_coverage', coverage)
+            else:
+                self.search_result.insert(2, 'pct_coverage', 100)
+
+            self.search_result = self.search_result.sort_values(by=['pct_coverage','pts_per_m2'], ascending=False)
+
+            return self.search_result
+
+        # Perform search of science-base resources
+        elif search_type == 'science-base':
+            import requests
+            from requests.adapters import HTTPAdapter
+            from urllib3.util.retry import Retry
+            if n_threads != 1:
+                from concurrent.futures import ThreadPoolExecutor, as_completed
+
+            self.search_area = search_area.to_crs(4326)
+            spatial_query = f'spatialQuery={self.search_area.geometry.iloc[0].wkt}'
+
+            # Define resource url and search parameters
+            BASE_URL = "https://www.sciencebase.gov/catalog/items"
+            PARENT_ID = "4f70ab64e4b058caae3f8def"
+
+            params = {
+                "parentId": PARENT_ID,
+                "format": "json",
+                "filter": spatial_query,
+                "max": 500,  # number of results per page (default 20, max 1000)
+                "offset": 0 # start on first page of results
+            }
+
+            session = requests.Session()
+            retries = Retry(total=5, backoff_factor=1, status_forcelist=[429, 500, 502, 503, 504])
+            adapter = HTTPAdapter(max_retries=retries, pool_connections=50, pool_maxsize=50)
+            session.mount("https://", adapter)
+
+            # Get metadata for all items within search result, advancing to next page as necessary
+            n_failures = 0
+            recs_all = []
+            while True:
+                try:
+                    # Request page of results
+                    resp = session.get(BASE_URL, params=params, timeout=900)
+                    resp.raise_for_status()
+                    data = resp.json()
+
+                    items = data.get("items", [])
+                    if not items:
+                        break
+
+                    ids = [item['id'] for item in items]
+
+                    if n_threads == 1:
+                        for id in ids:
+                            recs_all.append(summarize_science_base_item(id), session)
+                    else:
+                        with ThreadPoolExecutor(max_workers=n_threads) as executor:
+                            futures = [executor.submit(summarize_science_base_item, i, session) for i in ids]
+                            recs_all.extend([f.result() for f in as_completed(futures)])
+
+                    # Stop at end of items list or go to next page
+                    # print(f"Retrieved {params['offset']} to {params["max"] + params['offset']}")
+                    if len(items) < params["max"]:
+                        break
+                    params["offset"] += params["max"]
+
+                except Exception as e:
+                    print(f'Failed to retrieve page starting at {params["offset"]}: {e}')
+                    if n_failures < 60:
+                        print(f'Trying again in 10s...')
+                        time.sleep(10)
+                        n_failures += 1
+                    else:
+                        print(f'Giving up after 60 tries')
+                        break
+
+            self.id_failed = [item for item in recs_all if isinstance(item, str)]
+            recs_all = [item for item in recs_all if not isinstance(item, str)]
+            recs_all = pd.DataFrame(recs_all)
+            recs_all = recs_all.drop_duplicates()
+            geom = geopandas.points_from_xy(recs_all['lon'], recs_all['lat'], crs=4326)
+            self.search_result = geopandas.GeoDataFrame(recs_all, geometry=geom, crs=4326)
+            return self.search_result
         else:
-            self.search_result.insert(2, 'pct_coverage', 100)
+            raise ValueError("search_type must be 'entwine' or 'science-base'")
 
-        self.search_result.sort_values(by=['pct_coverage','pts_per_m2'], ascending=False, inplace=True)
-
-        return self.search_result
 
     def select_url(self,index):
         """Select url from self.search_result using row index"""
         return self.search_result['url'].iloc[index]
+
+def summarize_science_base_item(id, session=None):
+    """Summarize metadata for a science-base lidar tile item. Returns dict if successful, else returns the id."""
+    item_url = f"https://www.sciencebase.gov/catalog/item/{id}?format=json"
+    try:
+        if session is None:
+            resp = requests.get(item_url, timeout=300)
+            resp.raise_for_status()
+            item_json = item_json.json()
+        else:
+            resp = session.get(item_url, timeout=300)
+            resp.raise_for_status()
+            item_json = resp.json()
+        bb = item_json['spatial']['boundingBox']
+        x = (bb['minX'] + bb['maxX']) / 2
+        y = (bb['minY'] + bb['maxY']) / 2
+        date_start = [date for date in item_json['dates'] if date['type'] == 'Start'][0]['dateString']
+        date_end = [date for date in item_json['dates'] if date['type'] == 'End'][0]['dateString']
+        url = [link for link in item_json['webLinks'] if link['type'] == 'download'][0]['uri']
+        name = item_json['title']
+        project_tile = name.replace('USGS Lidar Point Cloud ', '').split()
+        tile = project_tile[-1]
+        project = ' '.join(project_tile[:-1])
+        return {'lon':x, 'lat':y, 'project':project, 'tile':tile, 'date_start':date_start, 'date_end':date_end, 'url':url}
+    except Exception as e:
+        print(f"Failed to retrieve metadata for {item_url} \n {e}")
+        return id
 

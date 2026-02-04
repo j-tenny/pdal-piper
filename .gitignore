@@ -6,3 +6,5 @@
 /dist
 /pdal_piper.egg-info
 /test_data
+.idea/vcs.xml
+/.idea
