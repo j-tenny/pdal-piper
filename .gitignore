@@ -8,3 +8,6 @@
 /test_data
 .idea/vcs.xml
 /.idea
+/build
+*.pyi
+/.idea

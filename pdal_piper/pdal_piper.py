@@ -369,28 +369,36 @@ class USGS_3dep_Finder:
 
 def summarize_science_base_item(id, session=None):
     """Summarize metadata for a science-base lidar tile item. Returns dict if successful, else returns the id."""
+    import time
+    import random
+
     item_url = f"https://www.sciencebase.gov/catalog/item/{id}?format=json"
-    try:
-        if session is None:
-            resp = requests.get(item_url, timeout=300)
-            resp.raise_for_status()
-            item_json = item_json.json()
-        else:
-            resp = session.get(item_url, timeout=300)
-            resp.raise_for_status()
-            item_json = resp.json()
-        bb = item_json['spatial']['boundingBox']
-        x = (bb['minX'] + bb['maxX']) / 2
-        y = (bb['minY'] + bb['maxY']) / 2
-        date_start = [date for date in item_json['dates'] if date['type'] == 'Start'][0]['dateString']
-        date_end = [date for date in item_json['dates'] if date['type'] == 'End'][0]['dateString']
-        url = [link for link in item_json['webLinks'] if link['type'] == 'download'][0]['uri']
-        name = item_json['title']
-        project_tile = name.replace('USGS Lidar Point Cloud ', '').split()
-        tile = project_tile[-1]
-        project = ' '.join(project_tile[:-1])
-        return {'lon':x, 'lat':y, 'project':project, 'tile':tile, 'date_start':date_start, 'date_end':date_end, 'url':url}
-    except Exception as e:
-        print(f"Failed to retrieve metadata for {item_url} \n {e}")
-        return id
+    n_tries = 0
+    while n_tries < 3:
+        try:
+            if session is None:
+                resp = requests.get(item_url, timeout=300)
+                resp.raise_for_status()
+                item_json = resp.json()
+            else:
+                resp = session.get(item_url, timeout=300)
+                resp.raise_for_status()
+                item_json = resp.json()
+            bb = item_json['spatial']['boundingBox']
+            x = (bb['minX'] + bb['maxX']) / 2
+            y = (bb['minY'] + bb['maxY']) / 2
+            date_start = [date for date in item_json['dates'] if date['type'] == 'Start'][0]['dateString']
+            date_end = [date for date in item_json['dates'] if date['type'] == 'End'][0]['dateString']
+            url = [link for link in item_json['webLinks'] if link['type'] == 'download'][0]['uri']
+            name = item_json['title']
+            project_tile = name.replace('USGS Lidar Point Cloud ', '').split()
+            tile = project_tile[-1]
+            project = ' '.join(project_tile[:-1])
+            return {'lon':x, 'lat':y, 'project':project, 'tile':tile, 'date_start':date_start, 'date_end':date_end, 'url':url}
+        except Exception as e:
+            n_tries+=1
+            time.sleep(random.randint(0,5))
+
+    print(f"Failed to retrieve metadata for {item_url} \n {e}")
+    return id
 
