@@ -13,4 +13,4 @@ def _check_for_stub():
         print("Done.")
 
 # Auto-generate on first import
-_check_for_stub()
+# _check_for_stub()
