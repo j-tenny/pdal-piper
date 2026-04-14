@@ -305,7 +305,7 @@ class USGS_3dep_Finder:
         import requests
         from requests.adapters import HTTPAdapter
         from urllib3.util.retry import Retry
-        if n_threads != 1:
+        if n_threads is not None and n_threads != 1:
             from concurrent.futures import ThreadPoolExecutor, as_completed
 
         self.search_area = search_area.to_crs(4326)
@@ -319,22 +319,31 @@ class USGS_3dep_Finder:
             "parentId": PARENT_ID,
             "format": "json",
             "filter": spatial_query,
-            "max": 500,  # number of results per page (default 20, max 1000)
-            "offset": 0  # start on first page of results
+            "max": 500,
+            "offset": 0
         }
 
-        session = requests.Session()
-        retries = Retry(total=5, backoff_factor=1, status_forcelist=[429, 500, 502, 503, 504])
-        adapter = HTTPAdapter(max_retries=retries, pool_connections=50, pool_maxsize=50)
-        session.mount("https://", adapter)
+        # Dynamically size the connection pool to match or exceed threads
+        pool_size = max(50, n_threads) if isinstance(n_threads, int) else 50
 
-        # Get metadata for all items within search result, advancing to next page as necessary
+        session = requests.Session()
+        # Added 520-525 to handle WAF/Cloudflare intermittent drops
+        retries = Retry(
+            total=5,
+            backoff_factor=1.5,  # Slightly increased backoff for government APIs
+            status_forcelist=[429, 500, 502, 503, 504, 520, 521, 522, 523, 524, 525],
+            allowed_methods=["HEAD", "GET", "OPTIONS"]  # Explicitly allow retrying GETs
+        )
+        adapter = HTTPAdapter(max_retries=retries, pool_connections=pool_size, pool_maxsize=pool_size)
+        session.mount("https://", adapter)
+        session.mount("http://", adapter)
+
         n_failures = 0
         recs_all = []
+
         while True:
             try:
-                # Request page of results
-                resp = session.get(BASE_URL, params=params, timeout=900)
+                resp = session.get(BASE_URL, params=params, timeout=30)  # 900s is too long; 30s is safer
                 resp.raise_for_status()
                 data = resp.json()
 
@@ -344,73 +353,94 @@ class USGS_3dep_Finder:
 
                 ids = [item['id'] for item in items]
 
-                if n_threads == 1:
-                    for id in ids:
-                        recs_all.append(self._summarize_science_base_item(id, session))
+                if n_threads in (None, 0, 1):
+                    for item_id in ids:
+                        recs_all.append(self._summarize_science_base_item(item_id, session))
                 else:
                     with ThreadPoolExecutor(max_workers=n_threads) as executor:
                         futures = [executor.submit(self._summarize_science_base_item, i, session) for i in ids]
                         recs_all.extend([f.result() for f in as_completed(futures)])
 
-                # Stop at end of items list or go to next page
-                # print(f"Retrieved {params['offset']} to {params["max"] + params['offset']}")
                 if len(items) < params["max"]:
                     break
                 params["offset"] += params["max"]
 
             except Exception as e:
                 print(f'Failed to retrieve page starting at {params["offset"]}: {e}')
-                if n_failures < 60:
-                    print(f'Trying again in 10s...')
+                if n_failures < 10:  # Reduced from 60 to prevent endless hanging
+                    print('Trying again in 10s...')
                     time.sleep(10)
                     n_failures += 1
                 else:
-                    print(f'Giving up after 60 tries')
+                    print('Giving up after 10 pagination tries')
                     break
 
         self.id_failed = [item for item in recs_all if isinstance(item, str)]
-        recs_all = [item for item in recs_all if not isinstance(item, str)]
-        recs_all = pd.DataFrame(recs_all)
-        recs_all = recs_all.drop_duplicates()
+        recs_all = [item for item in recs_all if isinstance(item, dict)]
+
+        if not recs_all:
+            print("Warning: No records successfully retrieved.")
+            return None
+
+        recs_all = pd.DataFrame(recs_all).drop_duplicates()
         geom = geopandas.points_from_xy(recs_all['lon'], recs_all['lat'], crs=4326)
         self.search_result = geopandas.GeoDataFrame(recs_all, geometry=geom, crs=4326)
+
         return self.search_result
 
-    def _summarize_science_base_item(self, id, session=None):
+    def _summarize_science_base_item(self, item_id, session=None):
         """Summarize metadata for a science-base lidar tile item. Returns dict if successful, else returns the id."""
-        import time
-        import random
         import requests
 
-        item_url = f"https://www.sciencebase.gov/catalog/item/{id}?format=json"
-        n_tries = 0
-        while n_tries < 3:
-            try:
-                if session is None:
-                    resp = requests.get(item_url, timeout=300)
-                    resp.raise_for_status()
-                    item_json = resp.json()
-                else:
-                    resp = session.get(item_url, timeout=300)
-                    resp.raise_for_status()
-                    item_json = resp.json()
-                bb = item_json['spatial']['boundingBox']
-                x = (bb['minX'] + bb['maxX']) / 2
-                y = (bb['minY'] + bb['maxY']) / 2
-                date_start = [date for date in item_json['dates'] if date['type'] == 'Start'][0]['dateString']
-                date_end = [date for date in item_json['dates'] if date['type'] == 'End'][0]['dateString']
-                url = [link for link in item_json['webLinks'] if link['type'] == 'download'][0]['uri']
-                name = item_json['title']
-                project_tile = name.replace('USGS Lidar Point Cloud ', '').split()
-                tile = project_tile[-1]
-                project = ' '.join(project_tile[:-1])
-                return {'lon': x, 'lat': y, 'project': project, 'tile': tile, 'date_start': date_start,
-                        'date_end': date_end, 'url': url}
-            except Exception as e:
-                n_tries += 1
-                time.sleep(random.randint(0, 5))
-                print(f"Failed to retrieve metadata for {item_url} \n {e}")
-        return id
+        item_url = f"https://www.sciencebase.gov/catalog/item/{item_id}?format=json"
+
+        try:
+            # Rely on the session's urllib3 Retry logic rather than a custom while-loop
+            if session is None:
+                resp = requests.get(item_url, timeout=30)
+            else:
+                resp = session.get(item_url, timeout=30)
+
+            resp.raise_for_status()
+            item_json = resp.json()
+
+            # Safely extract bounding box
+            bb = item_json.get('spatial', {}).get('boundingBox', {})
+            if not bb:
+                raise ValueError("Missing bounding box data")
+
+            x = (bb.get('minX', 0) + bb.get('maxX', 0)) / 2
+            y = (bb.get('minY', 0) + bb.get('maxY', 0)) / 2
+
+            # Safely extract dates using next() with a default fallback
+            dates = item_json.get('dates', [])
+            date_start = next((d.get('dateString') for d in dates if d.get('type') == 'Start'), None)
+            date_end = next((d.get('dateString') for d in dates if d.get('type') == 'End'), None)
+
+            # Safely extract download URL
+            links = item_json.get('webLinks', [])
+            url = next((link.get('uri') for link in links if link.get('type') == 'download'), None)
+
+            name = item_json.get('title', '')
+            project_tile = name.replace('USGS Lidar Point Cloud ', '').split()
+
+            tile = project_tile[-1] if project_tile else ''
+            project = ' '.join(project_tile[:-1]) if len(project_tile) > 1 else ''
+
+            return {
+                'lon': x,
+                'lat': y,
+                'project': project,
+                'tile': tile,
+                'date_start': date_start,
+                'date_end': date_end,
+                'url': url
+            }
+
+        except Exception as e:
+            # We only land here if network retries totally failed OR parsing failed
+            print(f"Failed to retrieve/parse metadata for {item_url} \n {e}")
+            return item_id
 
 
     def select_url(self,index):
